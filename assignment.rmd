@@ -1,0 +1,537 @@
+```{r}
+#importing needed library
+library(dplyr)
+library(ggplot2)
+library (rsample)
+library(glmnet)
+library(visdat)
+library(MASS)
+
+```
+
+```{r}
+# import input data from csv file
+data = as.matrix(read.csv(file="~/Documents/customer shopping data.csv",header = TRUE))
+head(data)
+```
+
+```{r}
+data <- as.data.frame(data)
+
+# convert gender to numerical values
+data$gender <- as.numeric(factor(data$gender,levels = unique(data$gender)))
+
+
+# convert category to numerical values
+data$category <- as.numeric(factor(data$category,levels = unique(data$category)))
+
+# convert payment method to numerical values
+data$payment_method <- as.numeric(factor(data$payment_method,levels = unique(data$payment_method)))
+
+# convert shopping mall to numerical values
+data$shopping_mall <- as.numeric(factor(data$shopping_mall,levels = unique(data$shopping_mall)))
+```
+
+
+```{r}
+data_subset<-subset(data,select = c("age","price","category","payment_method","gender","quantity"))
+# convert invoice_date to Date format 
+data$invoice_date <- as.Date(data$invoice_date,format = "%d/%m/%Y")
+
+# create a time series object with monthly frequency(assuming data is monthly)
+data.ts <-ts(data_subset,start = c(as.numeric(format(min(data$invoice_date),"%Y")),
+                                  as.numeric(format(min(data$invoice_date),"%m"))),
+                      end = c(as.numeric(format(max(data$invoice_date),"%Y")),as.numeric(format(max(data$invoice_date),"%m"))),frequency = 12)
+
+
+# plot the time series of input x with one-month interval
+plot(data.ts,main = "Time series plot of Input",xlab = "Invoice Date",ylab = "inputs")
+```
+
+```{r}
+# task 1.1
+# convert invoice_date to Date format
+aggregated_data <- data %>%
+  mutate(invoice_date = as.Date(invoice_date, format = "%d/%m/%Y"), # Convert invoice_date to Date format
+         year_month = format(invoice_date, "%Y-%m"), # Extract year-month
+         quantity = as.numeric(quantity)) %>% # Ensure quantity is numeric
+  group_by(year_month) %>%
+  summarise(quantity = sum(quantity)) %>%
+  mutate(year_month = as.Date(paste0(year_month, "-01"))) # Convert year_month for plotting
+
+# Plot using ggplot2
+ggplot(aggregated_data, aes(x = year_month, y = quantity)) +
+  geom_line() + # Use geom_line() for time series
+  labs(title = "Time Series Plot of Output (Grouped by Year-Month)",
+       x = "Year-Month", y = "Total Quantity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x-axis labels
+```
+```{r}
+N <- sum(!is.na(data$price))
+# To show bandwidth, we willl ll first compute the density to extract the bandwidth used
+density_info <- density(as.numeric(data$price), na.rm = TRUE)  # Compute density, removing NA values
+bw_used <- density_info$bw  # Extract bandwidth
+
+ggplot(data, aes(x = as.numeric(price))) +
+  geom_density(fill="gray", alpha=0.5) + 
+  labs(title = "Density Plot of Price", x = "Price", y = "Density") +
+  theme_minimal() + 
+  annotate("text", x = Inf, y = Inf, label = sprintf("N = %d", N), vjust = 2, hjust = 1.05, size = 3.5) +
+  annotate("text", x = Inf, y = Inf, label = sprintf("Bandwidth = %.2f", bw_used), vjust = 4, hjust = 1.05, size = 3.5)
+
+```
+
+
+```{r}
+data_subset$price <- as.numeric(as.character(data_subset$price))
+
+# Remove any rows with NA values in 'price'
+data_subset <- na.omit(data_subset)
+
+# Create the plot
+ggplot(data_subset, aes(x = price)) +
+  geom_histogram(aes(y = ..density..), colour="black", fill="white") +
+  geom_density(colour="black", size=1) +
+  geom_rug(colour="gray", sides="b") + # Rug on bottom side only
+  labs(title = "Histogram and density plot of price", x = "Price", y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) # Center the plot title
+```
+
+```{r}
+# Calculate density estimates for the payment method
+density_of_payment <- density(data_subset$payment_method)
+ggplot() +
+  ggtitle("Density plot of whole inputs") +
+    theme_minimal() +
+    labs(x = "payment_method", y = "Density") +
+    geom_histogram(data = data_subset, aes(x = payment_method, y = ..density..), fill = "gray", color = "black", bins = 30) +
+    geom_line(data = data.frame(x = density_of_payment$x, y = density_of_payment$y), aes(x = x, y = y), color = "black", size = 1) +
+    geom_rug(data = data_subset, aes(x = payment_method), sides = "b", size = 0.5) +
+    labs(title = "Histogram and density plot of payment_method", x = "payment_method", y = "Density")
+
+```
+```{r}
+# Ensure the age column is treated as numeric
+data_subset$age <- as.numeric(as.character(data_subset$age))
+
+# Check to avoid any NA values introduced by conversion, which can also cause plotting issues
+sum(is.na(data_subset$age))  # This should ideally be 0; if not, you may need to handle NA values
+
+# Histogram overlaid with Density Plot for Age, ensuring age is numeric
+ggplot(data_subset, aes(x=age)) +
+  geom_histogram(aes(y=..density..), binwidth=5, colour="black", fill="lightgray") +
+  geom_density(alpha=.1, fill="lightgreen") +
+  ylim(0,0.022) +
+  labs(title="Histogram and density plot of age", x="Age", y="Density")
+```
+```{r}
+# Ensure the age column is treated as numeric
+data_subset$category <- as.numeric(as.character(data_subset$category))
+
+# Check to avoid any NA values introduced by conversion, which can also cause plotting issues
+sum(is.na(data_subset$category))  # This should ideally be 0; if not, you may need to handle NA values
+
+# Histogram overlaid with Density Plot for Age, ensuring age is numeric
+ggplot(data_subset, aes(x=category)) +
+  geom_histogram(aes(y=..density..), binwidth=0.5, colour="black", fill="lightgray") +
+  geom_density() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+
+  labs(title="Histogram and density plot of category", x="Category", y="Density")
+```
+
+```{r}
+# Ensure the age column is treated as numeric
+data_subset$quantity <- as.numeric(as.character(data_subset$quantity))
+
+# Check to avoid any NA values introduced by conversion, which can also cause plotting issues
+sum(is.na(data_subset$quantity))  # This should ideally be 0; if not, you may need to handle NA values
+
+# Histogram overlaid with Density Plot for Age, ensuring age is numeric
+ggplot(data_subset, aes(x=quantity)) +
+  geom_histogram(aes(y=..density..), binwidth=0.2, colour="black", fill="lightgray") +
+  geom_density()+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title="Histogram and density plot of quantity", x="Quantity", y="Density")
+```
+```{r}
+data_subset$age=as.numeric(data_subset$age)
+data_subset$quantity=as.numeric(data_subset$quantity)
+cor_coefficient <- cor(data_subset$age, data_subset$quantity, use = "complete.obs") # Handle missing values appropriately
+
+ggplot(data_subset, aes(x = age, y = quantity)) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(min(data_subset$age), max(data_subset$age), by = 10)) + # Adjust 'by' for different gaps
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Correlation between Age and Quantity", x = "Age", y = "Quantity") +
+  annotate("text", x = Inf, y = Inf, label = sprintf("Correlation: %.5f", cor_coefficient), 
+           hjust = 1.1, vjust = 1, size = 5, colour = "blue") 
+```
+
+```{r}
+data_subset$price=as.numeric(data_subset$price)
+data_subset$quantity=as.numeric(data_subset$quantity)
+cor_coefficient <- cor(data_subset$price, data_subset$quantity, use = "complete.obs") # Handle missing values appropriately
+
+ggplot(data_subset, aes(x = price, y = quantity)) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(min(data_subset$price), max(data_subset$price), by = 1000)) + # Adjust 'by' for different gaps
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Correlation between Price and Quantity", x = "Price", y = "Quantity") +
+  annotate("text", x = Inf, y = Inf, label = sprintf("Correlation: %.5f", cor_coefficient), 
+           hjust = 1.1, vjust = 1, size = 5, colour = "blue")
+
+```
+```{r}
+data_subset$category=as.numeric(data_subset$category)
+data_subset$quantity=as.numeric(data_subset$quantity)
+cor_coefficient <- cor(data_subset$category, data_subset$quantity, use = "complete.obs") # Handle missing values appropriately
+ggplot(data_subset, aes(x = category, y = quantity)) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(min(data_subset$category), max(data_subset$category), by = 1)) + # Adjust 'by' for different gaps
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Correlation between Category and Quantity", x = "Category", y = "Quantity") +
+  annotate("text", x = Inf, y = Inf, label = sprintf("Correlation: %.5f", cor_coefficient), 
+           hjust = 1.1, vjust = 1, size = 5, colour = "blue")
+```
+
+```{r}
+data_subset$payment_method=as.numeric(data_subset$payment_method)
+data_subset$quantity=as.numeric(data_subset$quantity)
+cor_coefficient <- cor(data_subset$payment_method, data_subset$quantity, use = "complete.obs") # Handle missing values appropriately
+ggplot(data_subset, aes(x = payment_method, y = quantity)) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(min(data_subset$payment_method), max(data_subset$payment_method), by = 1)) + # Adjust 'by' for different gaps
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Correlation between Payment Method and Quantity", x = "Payment Method", y = "Quantity") +
+  annotate("text", x = Inf, y = Inf, label = sprintf("Correlation: %.5f", cor_coefficient), 
+           hjust = 1.1, vjust = 1, size = 5, colour = "blue")
+```
+
+
+** Task 2**
+```{r}
+X1 <- as.numeric(data_subset$age)
+X2 <- as.numeric(data_subset$category)
+X3 <- as.numeric(data_subset$price)
+X4 <- as.numeric(data_subset$payment_method)
+# Prepare the y vector as a numeric vector
+y <- as.numeric(data_subset$quantity)
+# Prepare the design matrix X for the regression model
+ones <- rep(1, length(X1)) # Vector of ones for the intercept
+
+```
+```{r}
+# Fit the model 1
+model_1 <- lm(y ~ X4 + I(X1^2) + I(X1^3) + I(X2^4) + I(X1^4), data = data_subset)
+# Extract the estimated coefficients
+theta_hat_1 <- coef(model_1)
+theta_hat_1
+```
+```{r}
+# Fit the model 2
+model_2 <- lm(y ~ X4 + I(X1^3) + I(X3^4), data = data_subset)
+# Extract the estimated coefficients
+theta_hat_2 <- coef(model_2)
+theta_hat_2
+```
+```{r}
+# Fit the model 3
+model_3 <- lm(y ~ I(X3^3) + I(X3^4) , data = data_subset)
+# Extract the estimated coefficients
+theta_hat_3 <- coef(model_3)
+theta_hat_3
+```
+```{r}
+# Fit the model 4
+model_4 <- lm(y ~ X2 + I(X1^3) + I(X3^4) , data = data_subset)
+# Extract the estimated coefficients
+theta_hat_4 <- coef(model_4)
+theta_hat_4
+
+```
+```{r}
+# Fit the model 5
+model_5 <- lm(y ~ X4 + I(X1^2) + I(X1^3) + I(X3^4), data = data_subset)
+# Extract the estimated coefficients
+theta_hat_5 <- coef(model_5)
+theta_hat_5
+```
+```{r}
+# Calculate the predicted values for Model 1
+y_pred_1 <-predict(model_1)
+RSS_1 <- sum((y - y_pred_1)^2)
+
+# Calculate the predicted values for Model 2
+y_pred_2 <-predict(model_2)
+RSS_2 <- sum((y - y_pred_2)^2)
+
+# Calculate the predicted values for Model 3
+y_pred_3 <-predict(model_3)
+RSS_3 <- sum((y - y_pred_3)^2)
+
+# Calculate the predicted values for Model 4
+y_pred_4 <-predict(model_4)
+RSS_4 <- sum((y - y_pred_4)^2)
+# Calculate the predicted values for Model 5
+y_pred_5 <-predict(model_5)
+RSS_5 <- sum((y - y_pred_5)^2)
+t(list(RSS_1,RSS_2,RSS_3,RSS_4,RSS_5))
+```
+
+```{r}
+# Calculate the estimated variance of the model's residuals for each model
+n=length(y)
+sigma2_hat_1 <- RSS_1 / (n - 1)
+sigma2_hat_2 <- RSS_2 / (n - 1)
+sigma2_hat_3 <- RSS_3 / (n - 1)
+sigma2_hat_4 <- RSS_4 / (n - 1)
+sigma2_hat_5 <- RSS_5 / (n - 1)
+
+# Compute the log-likelihood for each model
+log_likelihood_1 <- -n/2 * log(2*pi) - n/2 * log(sigma2_hat_1) - 1/(2*sigma2_hat_1) * RSS_1
+log_likelihood_2 <- -n/2 * log(2*pi) - n/2 * log(sigma2_hat_2) - 1/(2*sigma2_hat_2) * RSS_2
+log_likelihood_3 <- -n/2 * log(2*pi) - n/2 * log(sigma2_hat_3) - 1/(2*sigma2_hat_3) * RSS_3
+log_likelihood_4 <- -n/2 * log(2*pi) - n/2 * log(sigma2_hat_4) - 1/(2*sigma2_hat_4) * RSS_4
+log_likelihood_5 <- -n/2 * log(2*pi) - n/2 * log(sigma2_hat_5) - 1/(2*sigma2_hat_5) * RSS_5
+dflikelihood <- data.frame(log_likelihood_1, log_likelihood_2, log_likelihood_3, log_likelihood_4, log_likelihood_5)
+dflikelihood
+```
+```{r}
+n <- length(y) 
+#Prepare k for number of estimator parameters from theta hats of each model
+k_1=length(theta_hat_1)
+k_2=length(theta_hat_2)
+k_3=length(theta_hat_3)
+k_4=length(theta_hat_4)
+k_5=length(theta_hat_5)
+
+# Calculate AIC and BIC for each model
+AIC_1 <- -2 * log_likelihood_1 + 2 * k_1
+BIC_1 <- -2 * log_likelihood_1 + k_1 * log(n)
+
+AIC_2 <- -2 * log_likelihood_2 + 2 * k_2
+BIC_2 <- -2 * log_likelihood_2 + k_2 * log(n)
+
+AIC_3 <- -2 * log_likelihood_3 + 2 * k_3
+BIC_3 <- -2 * log_likelihood_3 + k_3 * log(n)
+
+AIC_4 <- -2 * log_likelihood_4 + 2 * k_4
+BIC_4 <- -2 * log_likelihood_4 + k_4 * log(n)
+
+AIC_5 <- -2 * log_likelihood_5 + 2 * k_5
+BIC_5 <- -2 * log_likelihood_5 + k_5 * log(n)
+aic_bic_table <- data.frame(
+  Model = 1:5,
+  AIC = c(AIC_1, AIC_2, AIC_3, AIC_4, AIC_5),
+  BIC = c(BIC_1, BIC_2, BIC_3, BIC_4, BIC_5)
+)
+aic_bic_table
+```
+
+```{r}
+# Calculate residuals for Model
+residuals_1= y-y_pred_1
+df_residuals_1 <- data.frame(Residuals = residuals_1)
+
+# Create a Q-Q plot using ggplot2
+ggplot(df_residuals_1, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line(colour = "steelblue") +
+  ggtitle("Q-Q Plot for Model 1 Residuals") +
+  theme_minimal()
+```
+```{r}
+# Calculate residuals for Model
+residuals_2 <- y-y_pred_2
+
+df_residuals_2 <- data.frame(Residuals = residuals_2)
+
+# Create a Q-Q plot using ggplot2
+ggplot(df_residuals_2, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line(colour = "steelblue") +
+  ggtitle("Q-Q Plot for Model 2 Residuals") +
+  theme_minimal()
+```
+```{r}
+# Calculate residuals for Model
+residuals_3 <- y-y_pred_3
+
+df_residuals_3 <- data.frame(Residuals = residuals_3)
+
+# Create a Q-Q plot using ggplot2
+ggplot(df_residuals_3, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line(colour = "steelblue") +
+  ggtitle("Q-Q Plot for Model 3 Residuals") +
+  theme_minimal()
+```
+```{r}
+# Calculate residuals for Model
+residuals_4 <- y-y_pred_4
+
+df_residuals_4 <- data.frame(Residuals = residuals_4)
+
+# Create a Q-Q plot using ggplot2
+ggplot(df_residuals_4, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line(colour = "steelblue") +
+  ggtitle("Q-Q Plot for Model 4 Residuals") +
+  theme_minimal()
+```
+```{r}
+# Calculate residuals for Model
+residuals_5 <- y-y_pred_5
+
+df_residuals_5 <- data.frame(Residuals = residuals_5)
+
+# Create a Q-Q plot using ggplot2
+ggplot(df_residuals_1, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line(colour = "steelblue") +
+  ggtitle("Q-Q Plot for Model 5 Residuals") +
+  theme_minimal()
+```
+```{r}
+  X <- data.frame(X1 = data_subset$age, X2 = data_subset$category, X3 = data_subset$price, X4 = data_subset$payment_method)
+
+x <- as.matrix(x)
+y <- data$quantity
+
+```
+
+
+```{r}
+library(tidymodels)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Split the data into training and testing sets
+split_X <- initial_split(data = as.data.frame(X), prop = 0.7)
+split_Y <- initial_split(data = as.data.frame(data$quantity), prop = 0.7)
+
+X_training_set <- training(split_X)
+X_training_set$X1 <- as.numeric(X_training_set$X1)
+X_training_set$X2 <- as.numeric(X_training_set$X2)
+X_training_set$X3 <- as.numeric(X_training_set$X3)
+X_training_set$X4 <- as.numeric(X_training_set$X4)
+X_testing_set <- testing(split_X)
+
+X_testing_set$X1 <- as.numeric(X_testing_set$X1)
+X_testing_set$X2 <- as.numeric(X_testing_set$X2)
+X_testing_set$X3 <- as.numeric(X_testing_set$X3)
+X_testing_set$X4 <- as.numeric(X_testing_set$X4)
+Y_training_set <- as.matrix(training(split_Y))
+Y_testing_set <- as.matrix(testing(split_Y))
+
+# Fit the linear regression model
+lm_model <- lm(Y_training_set ~ I(X1^3) + I(X3^4), data = as.data.frame(X_training_set))
+
+# Create the matrix for the testing data using the same model equation
+testing_ones <- matrix(1, nrow = nrow(X_testing_set), ncol = 1)
+X_testing_model <- cbind(testing_ones, I(X_testing_set[, "X1"])^3, I(X_testing_set[, "X3"])^4)
+
+# Calculate model predictions on the testing model
+Y_testing_hat <- predict(lm_model, newdata = as.data.frame(X_testing_model))
+
+# Evaluating 95% confidence intervals for the model predictions
+confidence_intervals <- predict(lm_model, newdata = as.data.frame(X_testing_model), interval = "confidence", level = 0.95)
+
+# Extract lower and upper confidence bounds
+lower_ci <- confidence_intervals[, "lwr"]
+upper_ci <- confidence_intervals[, "upr"]
+
+
+# Plotting
+plot(Y_testing_set, pch = 16, col = "blue", xlab = "Index", ylab = "Y value", main = "Model Predictions and 95% Confidence Intervals")
+# Add model predictions
+points(Y_testing_hat, col = "red", pch = 16)
+
+# Add error bars for 95% confidence intervals
+segments(x0 = 1:length(Y_testing_set), y0 = lower_ci, y1 = upper_ci, col = "green")
+
+# Add legend
+legend("topright", legend = c("Testing Data", "Model Predictions", "95% CI"), col = c("blue", "red", "green"), pch = 16, cex = 0.8)
+
+```
+```{r}
+# Split the data into training and testing sets
+split_X <- initial_split(data = as.data.frame(X), prop = 0.7)
+split_Y <- initial_split(data = as.data.frame(data$quantity), prop = 0.7)
+
+X_training_set <- training(split_X)
+X_training_set$X1 <- as.numeric(X_training_set$X1)
+X_training_set$X2 <- as.numeric(X_training_set$X2)
+X_training_set$X3 <- as.numeric(X_training_set$X3)
+X_training_set$X4 <- as.numeric(X_training_set$X4)
+X_testing_set <- testing(split_X)
+
+X_testing_set$X1 <- as.numeric(X_testing_set$X1)
+X_testing_set$X2 <- as.numeric(X_testing_set$X2)
+X_testing_set$X3 <- as.numeric(X_testing_set$X3)
+X_testing_set$X4 <- as.numeric(X_testing_set$X4)
+Y_training_set <- as.matrix(training(split_Y))
+
+Y_testing_set <- as.matrix(testing(split_Y))
+
+# Fit the linear regression model using the training set
+lm_model_3 <- lm(Y_training_set ~ ., data = as.data.frame(X_training_set))
+
+# Use lm result to calculate predicted values for the testing set
+Y_testing_set_predicted <- predict(lm_model_3, newdata = as.data.frame(X_testing_set))
+
+# Calculate the residual sum of squares (RSS) for the testing set
+RSS_testing_set <- sum((as.numeric(Y_testing_set) - Y_testing_set_predicted)^2)
+
+# Print RSS_testing_set
+print(RSS_testing_set)
+
+# Define parameters
+theta_bias <- 2.829631
+theta_one <- 1.227041
+theta_two <- -2.124662
+epsilon <- RSS_testing_set * 2
+
+num_iterations <- 100
+accepted_values_1 <- numeric(num_iterations)
+accepted_values_2 <- numeric(num_iterations)
+counter <- 0 
+
+# Performing rejections ABC
+for (i in 1:num_iterations) {
+  range1 <- runif(1, -theta_bias, theta_bias)
+  range2 <- runif(1, -theta_one, theta_one)
+  
+  # Constructing new_theta_hat
+  new_theta_hat <- c(range1, range2, 0, 0)  # Assuming X_testing_set has 4 columns
+  
+  new_Y_Hat <- as.matrix(X_testing_set) %*% as.matrix(new_theta_hat)
+  new_RSS <- sum((as.numeric(Y_testing_set) - new_Y_Hat) ^ 2)
+  
+  if (new_RSS > epsilon) {
+    accepted_values_1[counter + 1] <- range1
+    accepted_values_2[counter + 2] <- range2
+    counter <- counter + 1
+  }
+}
+
+accepted_values_1 <- accepted_values_1[1:counter]
+accepted_values_2 <- accepted_values_2[1:counter]
+
+# Plot histograms
+par(mfrow = c(1, 2))
+par(mar = c(5, 5, 4, 2) + 0.1)
+hist(accepted_values_1, main = "Histogram of Accepted values (param 1)")
+hist(accepted_values_2, main = "Histogram of Accepted values (param 2)")
+
+# Plot joint posterior distribution
+par(mfrow = c(1, 1))
+par(mar = c(5, 4, 4, 2) + 0.1) 
+plot(accepted_values_1, accepted_values_2, col = c("green", "red"), 
+     main = "Joint and Marginal Posterior Dist")
+```
+
+
